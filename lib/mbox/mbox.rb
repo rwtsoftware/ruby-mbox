@@ -17,14 +17,35 @@
 # along with ruby-mbox. If not, see <http://www.gnu.org/licenses/>.
 #++
 
+require 'net/ssh'
+require 'net/sftp'
 require 'stringio'
 
 require 'mbox/mail'
 
 class Mbox
 	def self.open (path, options = {})
-		input = File.open(File.expand_path(path), 'r+:ASCII-8BIT')
+		input = File.open(File.expand_path(path), 'r+')
 
+		Mbox.open_input(input, path, options)
+	end
+
+	def self.open_remote_file (path, host, username, password, keys, options = {})
+		ssh_options = {}
+		if !password.nil?
+			ssh_options = { password: password }
+		end
+		if !keys.nil?
+			ssh_options = { keys: keys }
+		end
+
+		ssh = Net::SSH.start(host, username, ssh_options)
+		input = ssh.sftp.file.open(path, 'r+')
+
+		Mbox.open_input(input, path, options)
+	end
+
+	def self.open_input (input, path, options)
 		Mbox.new(input, options).tap {|mbox|
 			mbox.path = path
 			mbox.name = File.basename(path)
@@ -53,6 +74,8 @@ class Mbox
 			what.to_io
 		elsif what.is_a? String
 			StringIO.new(what)
+		elsif what.is_a? Net::SFTP::Operations::File
+			what
 		else
 			raise ArgumentError, 'I do not know what to do.'
 		end
@@ -61,7 +84,12 @@ class Mbox
 	end
 
 	def close
-		@input.close
+		if @input.present?
+			@input.close
+		end
+		if @ssh.present?
+			@ssh.close
+		end
 	end
 
 	def lock
